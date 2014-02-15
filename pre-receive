@@ -1,0 +1,129 @@
+#!/bin/bash
+# flush STDIN coming from git; we have no use for that info in this hook but
+# if you don't do this, git-shell sometimes dies of a signal 13 (SIGPIPE)
+#[ -t 0 ] || cat >/dev/null
+PATH=/usb/bin/:$PATH
+
+APIURL="http://192.168.13.7:9001"
+APIKEY="cM7I84LFT9s29u0tnxrvZaMze677ZE60" #test only
+
+set -e
+
+status() {
+  echo "-----> $*"
+}
+
+indent() {
+  c='s/^/       /'
+  case $(uname) in
+    Darwin) sed -l "$c";; # mac/bsd sed: -l buffers on line boundaries
+    *)      sed -u "$c";; # unix/gnu sed: -u unbuffered (arbitrary) chunks of data
+  esac
+}
+
+
+suppress () {
+	c="s/^/`echo $'\e[1G'`/"
+	case $(uname) in
+		# Darwin) sed -e "s/^/\x1b[1g/";; # mac/bsd sed: -l buffers on line boundaries
+		Darwin) sed -l "$c";; # mac/bsd sed: -l buffers on line boundaries
+		*)      sed -u "$c";; # unix/gnu sed: -u unbuffered (arbitrary) chunks of data
+	esac
+}
+
+
+echo | suppress
+
+
+while read oldrev newrev refname
+do
+	# Do something with $oldrev $newrev $refname
+	REF=$refname
+	NEWREV=$newrev
+done
+
+# GUMMI=`git ls-tree $NEWREV --name-only | grep .gummi`
+# if [ "$GUMMI" = "" ]; then
+#   exit 0
+# fi
+
+BRANCH=$(echo $REF | grep "refs/heads" | sed 's/refs\/heads\///g')
+if [ "$BRANCH" = "" ]; then
+	print "Couldn't determine branch. Ignoring."
+	exit 0;
+fi
+
+#REPO_NAME=$(pwd | awk -F"/"  '{ print  $NF }')
+REPO_NAME=$(pwd | awk -F"/"  '{ print  $(NF-1),":",$NF }' | tr -d ' ' )
+REPO_NAME=$(pwd | awk -F"/" '{print $NF}')
+#git config -l
+#pwd
+#echo $REPO_NAME
+#exit 1
+
+status "Update pushed to branch: $BRANCH" | suppress
+
+if [ "$(git ls-tree $NEWREV --name-only .gitmodules)" != "" ]; then
+	echo | suppress
+	echo " ! Git submodules are notsupported " | suppress
+	echo "" | suppress
+	exit 1
+fi
+
+# git archive --format tar.gz $NEWREV | ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_dsa  cdn@10.1.69.105 "cat - > git/$REPO_NAME-$BRANCH-$NEWREV.tar.gz"
+# print " > Repository exported"
+
+# echo " > Call api build:  " curl -N -u :cM7I84LFT9s29u0tnxrvZaMze677ZE60 -s "http://api.nibbler.cz/git/$REPO_NAME/$BRANCH/$NEWREV"
+echo "Reponame" $REPO_NAME | indent | suppress
+echo "Reponame" $BRANCH | indent | suppress
+echo "Reponame" $NEWREV | indent | suppress
+
+
+
+
+status "Calling build api" | suppress
+IFS=$'\n'
+
+curl -s -N -u :$APIKEY -s "$APIURL/git/$REPO_NAME/$BRANCH/$NEWREV" 2>&1 | \
+while read i
+do
+	WAS_RESULT=1
+
+
+	if [ "$i" = "94ed473f82c3d1791899c7a732fc8fd0_exit_0" ]; then
+		export TERM="xterm"
+		tput setaf 2
+		echo -n " > Success" | suppress
+		tput sgr0
+		echo -e "\n" | suppress
+		exit 5
+	fi
+
+	# TODO predelat na regular
+	if [ "$i" = "94ed473f82c3d1791899c7a732fc8fd0_exit_1" ]; then
+		export TERM="xterm"
+		tput setaf 1
+		echo -n " > Build failed! " | suppress
+		tput sgr0
+		echo -e "\n" | suppress
+		echo | suppress
+
+		exit 1
+	fi
+	echo " $i" | suppress | indent
+
+done
+
+if [ "$?" = "5" ]; then
+	echo | suppress
+	exit 0
+fi
+
+export TERM="xterm"
+tput setaf 1
+status "Invalid api reposne " | suppress
+tput sgr0
+echo | suppress
+
+
+exit 1
